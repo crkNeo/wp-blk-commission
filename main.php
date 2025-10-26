@@ -24,6 +24,7 @@ require_once COMMISSION_PLUGIN_PATH . 'admin-page.php';
 require_once COMMISSION_PLUGIN_PATH . 'api.php';
 require_once COMMISSION_PLUGIN_PATH . 'reports-extension.php';
 require_once COMMISSION_PLUGIN_PATH . 'frontend-reports.php';
+require_once COMMISSION_PLUGIN_PATH . 'referral-links.php';
 // Note: block-checkout.php no longer needed as we use WooCommerce native coupons
 
 // Initialize plugin
