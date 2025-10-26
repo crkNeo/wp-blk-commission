@@ -90,7 +90,7 @@ function process_commission_on_order_complete($order_id) {
         // Check WooCommerce coupons used in this order
         $coupons_used = $order->get_coupon_codes();
         $found_commission_coupon = false;
-        
+
         foreach ($coupons_used as $coupon_code) {
             // Check if this is a commission system coupon
             $coupon_data = get_commission_coupon_data($coupon_code);
@@ -98,19 +98,42 @@ function process_commission_on_order_complete($order_id) {
                 // Save commission coupon data to order meta
                 update_post_meta($order_id, '_commission_coupon_used', $coupon_code);
                 update_post_meta($order_id, '_commission_coupon_data', $coupon_data);
-                
+
                 $order->add_order_note("Commission coupon detected: $coupon_code", false, true);
-                
+
                 $commission_coupon = $coupon_code;
                 $found_commission_coupon = true;
                 break;
             }
         }
-        
+
         if (!$found_commission_coupon) {
-            // Add a note that no commission coupon was used
-            $order->add_order_note("No commission coupon was used for this order.", false, true);
-            return;
+            // Check if user has a referral relationship (even without using coupon)
+            $user_id = $order->get_user_id();
+
+            if ($user_id) {
+                // Check user's referral code from user meta
+                $user_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+
+                if (!empty($user_referral_code)) {
+                    // User has a referral relationship, use that coupon code
+                    $commission_coupon = $user_referral_code;
+                    $found_commission_coupon = true;
+
+                    // Save to order meta
+                    update_post_meta($order_id, '_commission_coupon_used', $commission_coupon);
+
+                    $order->add_order_note("Commission triggered by user referral relationship (Code: $commission_coupon) - No coupon applied but referral relationship exists.", false, true);
+
+                    error_log("Commission: User $user_id has referral code $commission_coupon, processing commission even without coupon usage");
+                }
+            }
+
+            if (!$found_commission_coupon) {
+                // Add a note that no commission coupon was used and no referral relationship exists
+                $order->add_order_note("No commission coupon was used for this order and no referral relationship found.", false, true);
+                return;
+            }
         }
     }
     
