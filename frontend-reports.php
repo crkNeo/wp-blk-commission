@@ -200,6 +200,11 @@ function commission_show_frontend_reports_content($user_data = null) {
                     <div class="summary-card">
                         <h3>我的角色</h3>
                         <span class="role"><?php echo $user_data['user_type']; ?></span>
+                        <?php if (!empty($user_data['summary']['downline_count'])): ?>
+                            <small style="display: block; margin-top: 8px; color: #666; font-size: 0.9em;">
+                                下線人數: <?php echo $user_data['summary']['downline_count']; ?>
+                            </small>
+                        <?php endif; ?>
                     </div>
                 </div>
                 
@@ -280,6 +285,11 @@ function commission_show_wc_account_reports_content($user_data) {
             <div class="summary-card">
                 <h3>我的角色</h3>
                 <span class="role"><?php echo $user_data['user_type']; ?></span>
+                <?php if (!empty($user_data['summary']['downline_count'])): ?>
+                    <small style="display: block; margin-top: 8px; color: #666; font-size: 0.9em;">
+                        下線人數: <?php echo $user_data['summary']['downline_count']; ?>
+                    </small>
+                <?php endif; ?>
             </div>
         </div>
         
@@ -763,11 +773,16 @@ function commission_get_user_commission_data($user_email) {
     ), ARRAY_A);
     
     if (!empty($holder_records)) {
-        $user_type = '推薦人';
+        // Get holder's level based on downline count
+        $holder_level = commission_get_holder_level($user_email);
+        $user_type = $holder_level['display_name'];
+
         $reports = commission_format_user_reports($holder_records, 'holder');
         $summary['total_orders'] = count($holder_records);
         $summary['total_sales'] = array_sum(array_column($holder_records, 'order_total'));
         $summary['total_commission'] = array_sum(array_column($holder_records, 'holder_commission'));
+        $summary['downline_count'] = $holder_level['downline_count'];
+        $summary['level_badge'] = $holder_level['badge'];
     }
     
     // Check if user is a teacher
@@ -967,6 +982,9 @@ function commission_dashboard_widget_content() {
             </div>
             <div class="summary-item">
                 <strong>角色：</strong><?php echo $user_data['user_type']; ?>
+                <?php if (!empty($user_data['summary']['downline_count'])): ?>
+                    <br><small style="color: #666;">下線: <?php echo $user_data['summary']['downline_count']; ?> 人</small>
+                <?php endif; ?>
             </div>
         </div>
         <p style="text-align: center; margin-top: 15px;">
@@ -1013,18 +1031,109 @@ function commission_flush_rewrite_rules_on_deactivation() {
 function commission_is_user_in_system($user_email) {
     global $wpdb;
     $coupons_table = $wpdb->prefix . 'commission_coupons';
-    
+
     // Check if user is a holder, teacher, or director in active coupons
     $result = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM $coupons_table 
+        "SELECT COUNT(*) FROM $coupons_table
          WHERE status = 'active' AND (
-             holder_email = %s OR 
-             teacher_email = %s OR 
+             holder_email = %s OR
+             teacher_email = %s OR
              director_email = %s
          )",
         $user_email, $user_email, $user_email
     ));
-    
+
     return $result > 0;
+}
+
+/**
+ * Get holder's level based on downline count
+ * 根據下線數量獲取推薦人等級
+ *
+ * @param string $holder_email Holder's email address
+ * @return array Level information including badge, display name, and downline count
+ */
+function commission_get_holder_level($holder_email) {
+    global $wpdb;
+    $downlines_table = $wpdb->prefix . 'commission_downlines';
+
+    // Get downline count for this holder
+    $downline_count = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $downlines_table WHERE holder_email = %s",
+        $holder_email
+    ));
+
+    $downline_count = intval($downline_count);
+
+    // Determine level based on downline count
+    if ($downline_count <= 100) {
+        $level = 'V';
+        $level_name = 'V級';
+        $color = '#6366f1'; // Indigo
+        $description = '初級推薦人';
+    } elseif ($downline_count <= 200) {
+        $level = 'P';
+        $level_name = 'P級';
+        $color = '#8b5cf6'; // Purple
+        $description = '中級推薦人';
+    } else {
+        $level = 'A';
+        $level_name = 'A級';
+        $color = '#f59e0b'; // Amber/Gold
+        $description = '高級推薦人';
+    }
+
+    return array(
+        'level' => $level,
+        'level_name' => $level_name,
+        'display_name' => $level_name . ' 推薦人',
+        'description' => $description,
+        'downline_count' => $downline_count,
+        'color' => $color,
+        'badge' => commission_generate_level_badge($level, $level_name, $color, $downline_count)
+    );
+}
+
+/**
+ * Generate HTML badge for holder level
+ * 生成等級徽章HTML
+ */
+function commission_generate_level_badge($level, $level_name, $color, $downline_count) {
+    $badge_html = sprintf(
+        '<span class="holder-level-badge level-%s" style="background: linear-gradient(135deg, %s, %s); color: white; padding: 8px 16px; border-radius: 20px; font-weight: bold; display: inline-block; box-shadow: 0 2px 8px rgba(0,0,0,0.15);" title="%d 位下線">
+            %s
+        </span>',
+        strtolower($level),
+        $color,
+        commission_lighten_color($color, 20),
+        $downline_count,
+        $level_name
+    );
+
+    return $badge_html;
+}
+
+/**
+ * Lighten a hex color
+ * 將十六進制顏色變亮
+ */
+function commission_lighten_color($hex, $percent) {
+    // Remove # if present
+    $hex = str_replace('#', '', $hex);
+
+    // Convert to RGB
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+
+    // Lighten
+    $r = min(255, $r + ($percent * 255 / 100));
+    $g = min(255, $g + ($percent * 255 / 100));
+    $b = min(255, $b + ($percent * 255 / 100));
+
+    // Convert back to hex
+    return '#' . str_pad(dechex($r), 2, '0', STR_PAD_LEFT)
+              . str_pad(dechex($g), 2, '0', STR_PAD_LEFT)
+              . str_pad(dechex($b), 2, '0', STR_PAD_LEFT);
 }
 ?>
