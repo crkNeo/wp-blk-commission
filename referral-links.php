@@ -433,10 +433,11 @@ function commission_generate_referral_link($coupon_code, $page_id = null) {
     if ($page_id) {
         // 如果指定了頁面ID，生成到該頁面的推薦鏈接
         $base_url = get_permalink($page_id);
-        return add_query_arg('ref', $coupon_code, $base_url);
     } else {
-        // 生成簡短的推薦鏈接（首頁 + 折扣碼）
-        $home_url = trailingslashit(home_url());
-        return $home_url . $coupon_code;
+        // 使用首頁作為基礎URL
+        $base_url = home_url('/');
     }
+
+    // 統一使用 ?ref=CODE 格式
+    return add_query_arg('ref', $coupon_code, $base_url);
 }
