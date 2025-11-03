@@ -343,13 +343,12 @@ function process_commission_on_order_complete($order_id) {
     }
 
     if ($coupon_data) {
-        // Process downline relationship (only if not Scenario 2-2)
-        $customer_email = $order->get_billing_email();
-        if (empty($temp_holder_email)) {
-            add_downline($coupon_data['holder_email'], $customer_email);
-        }
-
         // Calculate and record commission
+        // Note: Downline relationships are already handled in the scenario logic above
+        // - Scenario 1: add_downline called at line 282
+        // - Scenario 2-1: commission_transfer_referral handles it
+        // - Scenario 2-2: no downline change needed
+        // - existing_relationship: user is already a downline
         $order_total = $order->get_total();
         $commission_result = calculate_and_record_commission($coupon_data, $order_total, $order_id);
 
