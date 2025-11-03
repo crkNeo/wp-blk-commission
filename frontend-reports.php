@@ -186,8 +186,8 @@ function commission_show_frontend_reports_content($user_data = null) {
                 <!-- Summary Cards -->
                 <div class="commission-summary">
                     <div class="summary-card">
-                        <h3>總訂單數</h3>
-                        <span class="number"><?php echo $user_data['summary']['total_orders']; ?></span>
+                        <h3>總團隊人數</h3>
+                        <span class="number"><?php echo $user_data['summary']['downline_count']; ?></span>
                     </div>
                     <div class="summary-card">
                         <h3>總銷售額</h3>
@@ -201,18 +201,15 @@ function commission_show_frontend_reports_content($user_data = null) {
                         <h3>我的角色</h3>
                         <span class="role"><?php echo $user_data['user_type']; ?></span>
                         <?php if (!empty($user_data['summary']['downline_count'])): ?>
-                            <small style="display: block; margin-top: 8px; color: #666; font-size: 0.9em;">
-                                下線人數: <?php echo $user_data['summary']['downline_count']; ?>
-                            </small>
                         <?php endif; ?>
                     </div>
                 </div>
-                
+
                 <!-- Export Button -->
                 <div class="export-section">
                     <a href="<?php echo home_url('/commission-reports/export/'); ?>" class="export-btn">匯出CSV報表</a>
                 </div>
-                
+
                 <!-- Reports Table -->
                 <div class="reports-table-container">
                     <table class="commission-reports-table">
@@ -252,27 +249,27 @@ function commission_show_frontend_reports_content($user_data = null) {
                         </tbody>
                     </table>
                 </div>
-                
+
             <?php endif; ?>
         </div>
     </div>
-<?php } 
+<?php }
 
 // WooCommerce My Account specific content (without header/footer)
 function commission_show_wc_account_reports_content($user_data) {
     ?>
-    
+
     <?php if (empty($user_data['reports'])): ?>
         <div class="woocommerce-message woocommerce-message--info woocommerce-info">
             目前沒有分潤記錄。
         </div>
     <?php else: ?>
-        
+
         <!-- Summary Cards -->
         <div class="commission-summary wc-account">
             <div class="summary-card">
-                <h3>總訂單數</h3>
-                <span class="number"><?php echo $user_data['summary']['total_orders']; ?></span>
+                <h3>總團隊人數</h3>
+                <span class="number"><?php echo $user_data['summary']['downline_count']; ?></span>
             </div>
             <div class="summary-card">
                 <h3>總銷售額</h3>
@@ -283,28 +280,23 @@ function commission_show_wc_account_reports_content($user_data) {
                 <span class="number">$<?php echo number_format($user_data['summary']['total_commission'], 2); ?></span>
             </div>
             <div class="summary-card">
-                <h3>我的角色</h3>
+                <h3>我的等級</h3>
                 <span class="role"><?php echo $user_data['user_type']; ?></span>
-                <?php if (!empty($user_data['summary']['downline_count'])): ?>
-                    <small style="display: block; margin-top: 8px; color: #666; font-size: 0.9em;">
-                        下線人數: <?php echo $user_data['summary']['downline_count']; ?>
-                    </small>
-                <?php endif; ?>
             </div>
         </div>
-        
+
         <!-- Export Button -->
         <div class="export-section wc-account">
             <a href="<?php echo add_query_arg('export', 'csv', wc_get_account_endpoint_url('commission-reports')); ?>" class="button wc-forward">匯出CSV報表</a>
         </div>
-        
+
         <!-- Reports Table -->
         <div class="woocommerce-table woocommerce-table--order-details shop_table shop_table_responsive">
             <table class="woocommerce-table__table table">
                 <thead>
                     <tr>
                         <th class="woocommerce-table__product-name product-name">訂單編號</th>
-                        <th class="woocommerce-table__product-table product-total">折扣碼</th>
+                        <th class="woocommerce-table__product-table product-total">推薦碼</th>
                         <th class="woocommerce-table__product-table product-total">訂單總額</th>
                         <th class="woocommerce-table__product-table product-total">我的分潤</th>
                         <th class="woocommerce-table__product-table product-total">分潤比例</th>
@@ -349,9 +341,9 @@ function commission_show_wc_account_reports_content($user_data) {
                 </tbody>
             </table>
         </div>
-        
+
     <?php endif; ?>
-    
+
     <style>
     /* Enhanced styles for WooCommerce My Account reports */
     .commission-summary.wc-account {
@@ -360,7 +352,7 @@ function commission_show_wc_account_reports_content($user_data) {
         gap: 16px;
         margin-bottom: 32px;
     }
-    
+
     .commission-summary.wc-account .summary-card {
         background-color: #fff;
         padding: 20px;
@@ -375,7 +367,7 @@ function commission_show_wc_account_reports_content($user_data) {
         transform: translateY(-3px);
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
     }
-    
+
     .commission-summary.wc-account .summary-card h3 {
         margin: 0 0 8px 0;
         color: #6b7280;
@@ -383,21 +375,21 @@ function commission_show_wc_account_reports_content($user_data) {
         font-weight: 500;
         text-transform: uppercase;
     }
-    
+
     .commission-summary.wc-account .summary-card .number {
         font-size: 1.75em;
         font-weight: 600;
         color: #1d4ed8;
         display: block;
     }
-    
+
     .commission-summary.wc-account .summary-card .role {
         font-size: 1.2em;
         font-weight: 500;
         color: #059669;
         display: block;
     }
-    
+
     .export-section.wc-account {
         text-align: right;
         margin-bottom: 20px;
@@ -414,7 +406,7 @@ function commission_show_wc_account_reports_content($user_data) {
         background-color: #1d4ed8 !important;
         color: white !important;
     }
-    
+
     /* The woocommerce-table is styled by the theme, we just add specifics */
     .woocommerce-table--order-details .commission-type-badge,
     .woocommerce-table--order-details .commission-status-badge {
@@ -425,23 +417,23 @@ function commission_show_wc_account_reports_content($user_data) {
         text-transform: capitalize;
         display: inline-block;
     }
-    
+
     .woocommerce-table--order-details .type-bonus,
     .woocommerce-table--order-details .status-completed {
         background-color: #dcfce7;
         color: #166534;
     }
-    
+
     .woocommerce-table--order-details .type-point {
         background-color: #dbeafe;
         color: #1e40af;
     }
-    
+
     .woocommerce-table--order-details .type-pending {
         background-color: #fef3c7;
         color: #92400e;
     }
-    
+
     .woocommerce-table--order-details .status-pending {
         background-color: #fee2e2;
         color: #991b1b;
@@ -453,11 +445,11 @@ function commission_show_wc_account_reports_content($user_data) {
             grid-template-columns: 1fr 1fr;
             gap: 10px;
         }
-        
+
         .commission-summary.wc-account .summary-card {
             padding: 15px 10px;
         }
-        
+
         .commission-summary.wc-account .summary-card .number,
         .commission-summary.wc-account .summary-card .role {
             font-size: 1.3em;
@@ -481,7 +473,7 @@ function commission_show_wc_account_reports_content($user_data) {
             border-radius: 4px;
             padding: 10px;
         }
-        
+
         .woocommerce-table--order-details td {
             display: flex;
             justify-content: space-between;
@@ -504,7 +496,7 @@ function commission_show_wc_account_reports_content($user_data) {
         }
     }
     </style>
-    
+
     <?php
 }
 
@@ -517,27 +509,27 @@ function commission_add_frontend_styles() {
         background: #f8f9fa;
         min-height: 80vh;
     }
-    
+
     .commission-frontend-reports .container {
         max-width: 1200px;
         margin: 0 auto;
         padding: 0 20px;
     }
-    
+
     .commission-frontend-reports h1 {
         text-align: center;
         margin-bottom: 40px;
         color: #333;
         font-size: 2.5em;
     }
-    
+
     .commission-summary {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 20px;
         margin-bottom: 40px;
     }
-    
+
     .summary-card {
         background: white;
         padding: 30px;
@@ -545,30 +537,30 @@ function commission_add_frontend_styles() {
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         text-align: center;
     }
-    
+
     .summary-card h3 {
         margin: 0 0 15px 0;
         color: #666;
         font-size: 1.1em;
     }
-    
+
     .summary-card .number {
         font-size: 2.2em;
         font-weight: bold;
         color: #2c5aa0;
     }
-    
+
     .summary-card .role {
         font-size: 1.5em;
         font-weight: bold;
         color: #28a745;
     }
-    
+
     .export-section {
         text-align: center;
         margin-bottom: 30px;
     }
-    
+
     .export-btn {
         background: #007cba;
         color: white;
@@ -578,24 +570,24 @@ function commission_add_frontend_styles() {
         font-weight: bold;
         transition: background 0.3s;
     }
-    
+
     .export-btn:hover {
         background: #005a87;
         color: white;
     }
-    
+
     .reports-table-container {
         background: white;
         border-radius: 10px;
         overflow: hidden;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
-    
+
     .commission-reports-table {
         width: 100%;
         border-collapse: collapse;
     }
-    
+
     .commission-reports-table th {
         background: #f8f9fa;
         padding: 15px;
@@ -604,48 +596,48 @@ function commission_add_frontend_styles() {
         color: #333;
         border-bottom: 2px solid #dee2e6;
     }
-    
+
     .commission-reports-table td {
         padding: 15px;
         border-bottom: 1px solid #dee2e6;
     }
-    
+
     .commission-reports-table tr:hover {
         background: #f8f9fa;
     }
-    
+
     .type-badge, .status-badge {
         padding: 5px 12px;
         border-radius: 20px;
         font-size: 0.85em;
         font-weight: bold;
     }
-    
+
     .type-bonus {
         background: #d4edda;
         color: #155724;
     }
-    
+
     .type-point {
         background: #cce5ff;
         color: #004085;
     }
-    
+
     .type-pending {
         background: #fff3cd;
         color: #856404;
     }
-    
+
     .status-completed {
         background: #d4edda;
         color: #155724;
     }
-    
+
     .status-pending {
         background: #f8d7da;
         color: #721c24;
     }
-    
+
     .no-data {
         text-align: center;
         padding: 60px 20px;
@@ -653,29 +645,29 @@ function commission_add_frontend_styles() {
         border-radius: 10px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
-    
+
     .no-data p {
         font-size: 1.2em;
         color: #666;
         margin: 0;
     }
-    
+
     @media (max-width: 768px) {
         .commission-summary {
             grid-template-columns: 1fr;
         }
-        
+
         .commission-reports-table {
             font-size: 0.9em;
         }
-        
+
         .commission-reports-table th,
         .commission-reports-table td {
             padding: 10px 8px;
         }
     }
     </style>
-    
+
     <?php
 }
 
@@ -683,28 +675,28 @@ function commission_handle_frontend_export() {
     if (!is_user_logged_in()) {
         wp_die('請先登入');
     }
-    
+
     $current_user = wp_get_current_user();
     $user_email = $current_user->user_email;
-    
+
     // Get user's commission data
     $user_data = commission_get_user_commission_data($user_email);
-    
+
     if (empty($user_data['reports'])) {
         wp_die('沒有可匯出的數據');
     }
-    
+
     $filename = 'my_commission_report_' . date('Y-m-d_H-i-s') . '.csv';
-    
+
     // Set headers for CSV download with UTF-8 BOM
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
-    
+
     $output = fopen('php://output', 'w');
-    
+
     // Add UTF-8 BOM for Excel compatibility
     fwrite($output, "\xEF\xBB\xBF");
-    
+
     // CSV headers
     fputcsv($output, array(
         'Order ID',
@@ -716,7 +708,7 @@ function commission_handle_frontend_export() {
         'Type',
         'Created Date'
     ));
-    
+
     // CSV data
     foreach ($user_data['reports'] as $report) {
         fputcsv($output, array(
@@ -730,7 +722,7 @@ function commission_handle_frontend_export() {
             $report['created_at']
         ));
     }
-    
+
     fclose($output);
     exit;
 }
@@ -739,7 +731,7 @@ function commission_get_user_commission_data($user_email) {
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
     $payments_table = $wpdb->prefix . 'commission_payments';
-    
+
     // Determine user type and get appropriate data
     $user_type = '';
     $reports = array();
@@ -748,7 +740,7 @@ function commission_get_user_commission_data($user_email) {
         'total_sales' => 0,
         'total_commission' => 0
     );
-    
+
     // Check if user is a holder
     $holder_records = $wpdb->get_results($wpdb->prepare(
         "SELECT r.*, 
@@ -771,7 +763,7 @@ function commission_get_user_commission_data($user_email) {
          ORDER BY r.created_at DESC",
         $user_email
     ), ARRAY_A);
-    
+
     if (!empty($holder_records)) {
         // Get holder's level based on downline count
         $holder_level = commission_get_holder_level($user_email);
@@ -784,7 +776,7 @@ function commission_get_user_commission_data($user_email) {
         $summary['downline_count'] = $holder_level['downline_count'];
         $summary['level_badge'] = $holder_level['badge'];
     }
-    
+
     // Check if user is a teacher
     if (empty($reports)) {
         $teacher_records = $wpdb->get_results($wpdb->prepare(
@@ -808,7 +800,7 @@ function commission_get_user_commission_data($user_email) {
              ORDER BY r.created_at DESC",
             $user_email
         ), ARRAY_A);
-        
+
         if (!empty($teacher_records)) {
             $user_type = '講師';
             $reports = commission_format_user_reports($teacher_records, 'teacher');
@@ -817,7 +809,7 @@ function commission_get_user_commission_data($user_email) {
             $summary['total_commission'] = array_sum(array_column($teacher_records, 'teacher_commission'));
         }
     }
-    
+
     // Check if user is a director
     if (empty($reports)) {
         $director_records = $wpdb->get_results($wpdb->prepare(
@@ -841,7 +833,7 @@ function commission_get_user_commission_data($user_email) {
              ORDER BY r.created_at DESC",
             $user_email
         ), ARRAY_A);
-        
+
         if (!empty($director_records)) {
             $user_type = '業務總監';
             $reports = commission_format_user_reports($director_records, 'director');
@@ -850,7 +842,7 @@ function commission_get_user_commission_data($user_email) {
             $summary['total_commission'] = array_sum(array_column($director_records, 'director_commission'));
         }
     }
-    
+
     return array(
         'user_type' => $user_type ?: '無角色',
         'reports' => $reports,
@@ -860,15 +852,15 @@ function commission_get_user_commission_data($user_email) {
 
 function commission_format_user_reports($records, $role) {
     $formatted_reports = array();
-    
+
     foreach ($records as $record) {
         $commission_field = $role . '_commission';
         $rate_field = $role . '_rate';
-        
+
         // Handle bonus records
         $bonus_field = ($role === 'holder') ? 'bonus_payment_type' : $role . '_bonus_payment_type';
         $bonus_date_field = ($role === 'holder') ? 'bonus_created_at' : $role . '_bonus_created_at';
-        
+
         if (!empty($record[$bonus_field]) && $record[$bonus_field] === 'bonus') {
             $formatted_reports[] = array(
                 'order_id' => $record['order_id'],
@@ -881,12 +873,12 @@ function commission_format_user_reports($records, $role) {
                 'created_at' => $record[$bonus_date_field] ?: $record['created_at']
             );
         }
-        
+
         // Handle point records
         $point_field = ($role === 'holder') ? 'point_payment_type' : $role . '_point_payment_type';
         $point_date_field = ($role === 'holder') ? 'point_created_at' : $role . '_point_created_at';
         $points_sent_field = ($role === 'holder') ? 'points_sent' : $role . '_points_sent';
-        
+
         if (!empty($record[$point_field]) && $record[$point_field] === 'point') {
             $formatted_reports[] = array(
                 'order_id' => $record['order_id'],
@@ -911,7 +903,7 @@ function commission_format_user_reports($records, $role) {
                 'created_at' => $record['created_at']
             );
         }
-        
+
         // If neither bonus nor points exist, show pending
         if (empty($record[$bonus_field]) && empty($record[$point_field]) && (!isset($record[$points_sent_field]) || !$record[$points_sent_field])) {
             $formatted_reports[] = array(
@@ -926,7 +918,7 @@ function commission_format_user_reports($records, $role) {
             );
         }
     }
-    
+
     return $formatted_reports;
 }
 
@@ -937,14 +929,14 @@ function commission_reports_shortcode($atts) {
     if (!is_user_logged_in()) {
         return '<p>請先登入查看您的分潤報表。<a href="' . wp_login_url(get_permalink()) . '">登入</a></p>';
     }
-    
+
     $current_user = wp_get_current_user();
     $user_data = commission_get_user_commission_data($current_user->user_email);
-    
+
     if (empty($user_data['reports'])) {
         return '<p>目前沒有分潤記錄。</p>';
     }
-    
+
     ob_start();
     commission_show_frontend_reports_content($user_data);
     return ob_get_clean();
@@ -956,7 +948,7 @@ add_action('wp_dashboard_setup', 'commission_add_dashboard_widget');
 function commission_add_dashboard_widget() {
     if (is_user_logged_in()) {
         $current_user = wp_get_current_user();
-        
+
         // Check if user is registered in commission system
         if (commission_is_user_in_system($current_user->user_email)) {
             wp_add_dashboard_widget(
@@ -1013,10 +1005,10 @@ register_activation_hook(__FILE__, 'commission_flush_rewrite_rules_on_activation
 function commission_flush_rewrite_rules_on_activation() {
     // Set flag to flush rewrite rules
     add_option('commission_flush_rewrite_rules_flag', true);
-    
+
     // Add the endpoint
     add_rewrite_endpoint('commission-reports', EP_ROOT | EP_PAGES);
-    
+
     // Flush immediately
     flush_rewrite_rules();
 }
@@ -1086,7 +1078,7 @@ function commission_get_holder_level($holder_email) {
     return array(
         'level' => $level,
         'level_name' => $level_name,
-        'display_name' => $level_name . ' 推薦人',
+        'display_name' => $level_name ,
         'description' => $description,
         'downline_count' => $downline_count,
         'color' => $color,

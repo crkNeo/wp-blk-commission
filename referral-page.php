@@ -62,13 +62,13 @@ function commission_add_referral_page_menu_item($items) {
             foreach ($items as $key => $value) {
                 $new_items[$key] = $value;
                 if ($key === 'commission-reports') {
-                    $new_items['referral-link'] = '我的推薦頁面';
+                    $new_items['referral-link'] = '我的推薦碼';
                 }
             }
 
             // If commission-reports doesn't exist, add at the end
             if (!isset($items['commission-reports'])) {
-                $new_items['referral-link'] = '我的推薦頁面';
+                $new_items['referral-link'] = '我的推薦碼';
             }
 
             return $new_items;
@@ -171,7 +171,7 @@ function commission_referral_page_content() {
 
     if (empty($referral_codes)) {
         echo '<div class="woocommerce-message woocommerce-message--info woocommerce-info">';
-        echo '您目前沒有推薦碼。請聯繫管理員獲取推薦碼。';
+        echo '您目前沒有推薦碼。';
         echo '</div>';
         return;
     }
@@ -184,62 +184,7 @@ function commission_referral_page_content() {
 
         <!-- Header with Level Badge -->
         <div class="referral-header">
-            <h2>我的推薦頁面</h2>
-            <div class="level-badge-large">
-                <?php echo $holder_level['badge']; ?>
-                <span class="downline-count">下線人數：<?php echo $holder_level['downline_count']; ?></span>
-            </div>
-        </div>
-
-        <!-- Statistics Cards -->
-        <div class="referral-stats">
-            <?php
-            global $wpdb;
-            $downlines_table = $wpdb->prefix . 'commission_downlines';
-            $records_table = $wpdb->prefix . 'commission_records';
-
-            $total_downlines = $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM $downlines_table WHERE holder_email = %s",
-                $user_email
-            ));
-
-            $total_commission = $wpdb->get_var($wpdb->prepare(
-                "SELECT SUM(holder_commission) FROM $records_table WHERE holder_email = %s",
-                $user_email
-            ));
-
-            $month_downlines = $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM $downlines_table
-                 WHERE holder_email = %s
-                 AND MONTH(created_at) = MONTH(CURRENT_DATE())
-                 AND YEAR(created_at) = YEAR(CURRENT_DATE())",
-                $user_email
-            ));
-            ?>
-
-            <div class="stat-card">
-                <div class="stat-icon">👥</div>
-                <div class="stat-value"><?php echo intval($total_downlines); ?></div>
-                <div class="stat-label">總下線人數</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">💰</div>
-                <div class="stat-value">$<?php echo number_format($total_commission, 2); ?></div>
-                <div class="stat-label">累計分潤</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">📈</div>
-                <div class="stat-value"><?php echo intval($month_downlines); ?></div>
-                <div class="stat-label">本月新增</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">🎯</div>
-                <div class="stat-value"><?php echo $holder_level['level']; ?>級</div>
-                <div class="stat-label">當前等級</div>
-            </div>
+            <h2>我的推薦碼</h2>
         </div>
 
         <!-- Referral Codes -->
@@ -252,7 +197,6 @@ function commission_referral_page_content() {
             <div class="referral-code-card">
                 <div class="card-header">
                     <h3>推薦碼：<span class="code-highlight"><?php echo esc_html($code['coupon_code']); ?></span></h3>
-                    <span class="discount-badge"><?php echo esc_html($code['discount_percentage']); ?>% OFF</span>
                 </div>
 
                 <div class="card-content">
@@ -284,45 +228,16 @@ function commission_referral_page_content() {
                         <!-- Commission Info -->
                         <div class="commission-info">
                             <div class="info-row">
-                                <span class="info-label">您的分潤比例：</span>
-                                <span class="info-value"><?php echo $holder_level['level']; ?>級 基礎
-                                    <?php
-                                    $rate_0_100 = get_option('commission_rate_0_100', 30);
-                                    $rate_101_200 = get_option('commission_rate_101_200', 35);
-                                    $rate_200_plus = get_option('commission_rate_200_plus', 40);
-
-                                    if ($holder_level['downline_count'] <= 100) {
-                                        echo $rate_0_100;
-                                    } elseif ($holder_level['downline_count'] <= 200) {
-                                        echo $rate_101_200;
-                                    } else {
-                                        echo $rate_200_plus;
-                                    }
-                                    ?>%
-                                </span>
+                                <span class="info-label">您當前等級：</span>
+                                <span class="info-value"><?php echo $holder_level['level']; ?>級</span>
                             </div>
-                            <?php if (!empty($code['teacher_email'])): ?>
-                            <div class="info-row">
-                                <span class="info-label">老師分潤：</span>
-                                <span class="info-value"><?php echo esc_html($code['teacher_rate']); ?>%</span>
-                            </div>
-                            <?php endif; ?>
-                            <?php if (!empty($code['director_email'])): ?>
-                            <div class="info-row">
-                                <span class="info-label">主管分潤：</span>
-                                <span class="info-value"><?php echo esc_html($code['director_rate']); ?>%</span>
-                            </div>
-                            <?php endif; ?>
                         </div>
 
                         <!-- Sharing Tips -->
                         <div class="sharing-tips">
-                            <h4>💡 分享小提示</h4>
+                            <h5>💡 分享小提示</h5>
                             <ul>
                                 <li>掃描 QR Code 或使用推薦網址分享給朋友</li>
-                                <li>客戶使用您的推薦碼購物，您將獲得分潤</li>
-                                <li>推薦越多，等級越高，分潤比例越高！</li>
-                                <li>推薦關係永久有效，客戶未來購物都有分潤</li>
                             </ul>
                         </div>
                     </div>
@@ -386,15 +301,13 @@ function commission_referral_page_content() {
     .referral-header {
         text-align: center;
         margin-bottom: 30px;
-        padding: 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        padding: 10px;
+        color: black;
         border-radius: 12px;
     }
 
     .referral-header h2 {
-        margin: 0 0 15px 0;
-        color: white;
+        color: black;
     }
 
     .level-badge-large {
@@ -456,7 +369,7 @@ function commission_referral_page_content() {
     }
 
     .card-header {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: darkgray;
         color: white;
         padding: 20px;
         display: flex;
@@ -491,6 +404,7 @@ function commission_referral_page_content() {
     .card-content {
         padding: 30px;
         display: grid;
+        align-items: center;
         grid-template-columns: auto 1fr;
         gap: 30px;
     }
@@ -596,7 +510,7 @@ function commission_referral_page_content() {
         border-left: 4px solid #f59e0b;
     }
 
-    .sharing-tips h4 {
+    .sharing-tips h5 {
         margin: 0 0 10px 0;
         color: #92400e;
     }
