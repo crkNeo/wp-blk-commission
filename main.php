@@ -110,15 +110,22 @@ function commission_user_has_purchase_history($user_id) {
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Check if user has any commission records (using email from orders)
+    // Simplified query: Check if user has any commission records
+    // by checking if any of their orders (identified by billing_email) have commission records
     $has_records = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM $records_table cr
-        INNER JOIN {$wpdb->posts} p ON cr.order_id = p.ID
-        INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
-        WHERE pm.meta_key = '_billing_email'
-        AND pm.meta_value = %s",
+        "SELECT COUNT(DISTINCT cr.id)
+        FROM $records_table cr
+        WHERE EXISTS (
+            SELECT 1
+            FROM {$wpdb->postmeta} pm
+            WHERE pm.post_id = cr.order_id
+            AND pm.meta_key = '_billing_email'
+            AND pm.meta_value = %s
+        )",
         $user->user_email
     ));
+
+    error_log("Commission: Checking purchase history for user $user_id ({$user->user_email}): Found $has_records records");
 
     return $has_records > 0;
 }
@@ -300,22 +307,30 @@ function process_commission_on_order_complete($order_id) {
             }
         } else {
             // User has existing referrer
+            error_log("Commission: User $user_id has existing referrer: $current_referrer_email");
+
             $new_coupon_data = get_commission_coupon_data($commission_coupon);
             if ($new_coupon_data) {
                 $new_holder_email = $new_coupon_data['holder_email'];
+                error_log("Commission: New coupon holder: $new_holder_email, Current holder: $current_referrer_email");
 
                 // Check if trying to use a different holder's code
                 if ($new_holder_email !== $current_referrer_email) {
+                    error_log("Commission: User $user_id is using a different holder's code. Checking purchase history...");
                     $has_purchase_history = commission_user_has_purchase_history($user_id);
+                    error_log("Commission: Purchase history result: " . ($has_purchase_history ? 'YES' : 'NO'));
 
                     if (!$has_purchase_history) {
                         // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
+                        error_log("Commission: Executing SCENARIO 2-1 - Transfer from $current_referrer_email to $new_holder_email");
                         commission_transfer_referral($user_id, $commission_coupon);
 
                         $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
                         error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
                     } else {
                         // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
+                        error_log("Commission: Executing SCENARIO 2-2 - User $user_id stays with $current_referrer_email, this order goes to $new_holder_email");
+
                         // Store temporary commission holder for this order only
                         update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
                         update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
@@ -323,6 +338,8 @@ function process_commission_on_order_complete($order_id) {
                         $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
                         error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
                     }
+                } else {
+                    error_log("Commission: User $user_id is using same holder's code ($new_holder_email). No scenario change needed.");
                 }
             }
         }
