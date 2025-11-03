@@ -68,10 +68,128 @@ function commission_admin_enqueue_scripts() {
     ));
 }
 
+/**
+ * Check if order contains excluded product categories
+ */
+function commission_order_has_excluded_categories($order_id) {
+    $order = wc_get_order($order_id);
+    if (!$order) return false;
+
+    // Excluded product categories (slug format)
+    $excluded_categories = array('member-events', 'featured-events');
+
+    foreach ($order->get_items() as $item) {
+        $product = $item->get_product();
+        if (!$product) continue;
+
+        // Get product categories as slugs
+        $categories = wp_get_post_terms($product->get_id(), 'product_cat', array('fields' => 'slugs'));
+
+        if (is_wp_error($categories)) continue;
+
+        // Check if any category is in the excluded list
+        foreach ($categories as $category) {
+            if (in_array($category, $excluded_categories)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Check if user has purchase history (has commission records)
+ */
+function commission_user_has_purchase_history($user_id) {
+    if (!$user_id) return false;
+
+    $user = get_user_by('id', $user_id);
+    if (!$user) return false;
+
+    global $wpdb;
+    $records_table = $wpdb->prefix . 'commission_records';
+
+    // Check if user has any commission records (using email from orders)
+    $has_records = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $records_table cr
+        INNER JOIN {$wpdb->posts} p ON cr.order_id = p.ID
+        INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+        WHERE pm.meta_key = '_billing_email'
+        AND pm.meta_value = %s",
+        $user->user_email
+    ));
+
+    return $has_records > 0;
+}
+
+/**
+ * Transfer referral relationship from one holder to another
+ */
+function commission_transfer_referral($user_id, $new_referral_code) {
+    $user = get_user_by('id', $user_id);
+    if (!$user) return false;
+
+    // Get new coupon data
+    $new_coupon_data = get_commission_coupon_data($new_referral_code);
+    if (!$new_coupon_data) return false;
+
+    $customer_email = $user->user_email;
+    $new_holder_email = $new_coupon_data['holder_email'];
+
+    // Get old referral info
+    $old_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+    $old_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
+
+    global $wpdb;
+    $downlines_table = $wpdb->prefix . 'commission_downlines';
+
+    // Remove from old holder's downlines if exists
+    if (!empty($old_referrer_email)) {
+        $wpdb->delete(
+            $downlines_table,
+            array(
+                'holder_email' => $old_referrer_email,
+                'downline_email' => $customer_email
+            ),
+            array('%s', '%s')
+        );
+
+        error_log("Commission: Removed user $user_id ($customer_email) from old holder $old_referrer_email");
+    }
+
+    // Add to new holder's downlines
+    $wpdb->insert(
+        $downlines_table,
+        array(
+            'holder_email' => $new_holder_email,
+            'downline_email' => $customer_email,
+            'created_at' => current_time('mysql')
+        ),
+        array('%s', '%s', '%s')
+    );
+
+    // Update user meta with new referral info
+    update_user_meta($user_id, '_commission_referral_code', $new_referral_code);
+    update_user_meta($user_id, '_commission_referrer_email', $new_holder_email);
+    update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
+
+    error_log("Commission: Transferred user $user_id ($customer_email) from $old_referrer_email to $new_holder_email");
+
+    return true;
+}
+
 function process_commission_on_order_complete($order_id) {
     $order = wc_get_order($order_id);
     if (!$order) return;
-    
+
+    // Check if order contains excluded product categories
+    if (commission_order_has_excluded_categories($order_id)) {
+        $order->add_order_note("Order contains excluded product categories (member-events or featured-events) - no commission will be processed.", false, true);
+        error_log("Commission: Order $order_id excluded due to product category");
+        return;
+    }
+
     // Check if commission already processed to avoid duplicates
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
@@ -79,80 +197,167 @@ function process_commission_on_order_complete($order_id) {
         "SELECT id FROM $records_table WHERE order_id = %d",
         $order_id
     ));
-    
+
     if ($existing) {
         return; // Already processed
     }
     
     // Check if commission coupon was used (stored in order meta)
     $commission_coupon = get_post_meta($order_id, '_commission_coupon_used', true);
-    
+
+    // Variable to track the source of the commission code
+    $commission_source = 'unknown';
+
     if (!$commission_coupon) {
-        // Check WooCommerce coupons used in this order
-        $coupons_used = $order->get_coupon_codes();
+        $user_id = $order->get_user_id();
         $found_commission_coupon = false;
 
-        foreach ($coupons_used as $coupon_code) {
-            // Check if this is a commission system coupon
-            $coupon_data = get_commission_coupon_data($coupon_code);
-            if ($coupon_data) {
-                // Save commission coupon data to order meta
-                update_post_meta($order_id, '_commission_coupon_used', $coupon_code);
-                update_post_meta($order_id, '_commission_coupon_data', $coupon_data);
+        // PRIORITY 1: Check Cookie for referral code (from referral link)
+        $cookie_referral_code = isset($_COOKIE[COMMISSION_REFERRAL_COOKIE]) ? $_COOKIE[COMMISSION_REFERRAL_COOKIE] : '';
 
-                $order->add_order_note("Commission coupon detected: $coupon_code", false, true);
-
-                $commission_coupon = $coupon_code;
+        if (!empty($cookie_referral_code)) {
+            // Validate the cookie referral code
+            $cookie_coupon_data = get_commission_coupon_data($cookie_referral_code);
+            if ($cookie_coupon_data && $cookie_coupon_data['status'] === 'active') {
+                $commission_coupon = $cookie_referral_code;
                 $found_commission_coupon = true;
-                break;
+                $commission_source = 'cookie';
+
+                error_log("Commission: Using cookie referral code: $cookie_referral_code");
+            }
+        }
+
+        // PRIORITY 2: Check WooCommerce coupons used in this order (manual coupon entry)
+        if (!$found_commission_coupon) {
+            $coupons_used = $order->get_coupon_codes();
+
+            foreach ($coupons_used as $coupon_code) {
+                // Check if this is a commission system coupon
+                $coupon_data = get_commission_coupon_data($coupon_code);
+                if ($coupon_data) {
+                    $commission_coupon = $coupon_code;
+                    $found_commission_coupon = true;
+                    $commission_source = 'manual_coupon';
+
+                    error_log("Commission: Using manually applied coupon: $coupon_code");
+                    break;
+                }
+            }
+        }
+
+        // PRIORITY 3: Check if user has existing referral relationship
+        if (!$found_commission_coupon && $user_id) {
+            $user_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+
+            if (!empty($user_referral_code)) {
+                // User has a referral relationship, use that coupon code
+                $commission_coupon = $user_referral_code;
+                $found_commission_coupon = true;
+                $commission_source = 'existing_relationship';
+
+                error_log("Commission: Using existing referral relationship: $user_referral_code");
             }
         }
 
         if (!$found_commission_coupon) {
-            // Check if user has a referral relationship (even without using coupon)
-            $user_id = $order->get_user_id();
+            // No commission source found
+            $order->add_order_note("No commission coupon was used for this order and no referral relationship found.", false, true);
+            return;
+        }
 
-            if ($user_id) {
-                // Check user's referral code from user meta
-                $user_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+        // Now handle the 3 scenarios based on user's current status
+        if ($user_id && $commission_source !== 'existing_relationship') {
+            $current_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+            $current_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
 
-                if (!empty($user_referral_code)) {
-                    // User has a referral relationship, use that coupon code
-                    $commission_coupon = $user_referral_code;
-                    $found_commission_coupon = true;
+            if (empty($current_referrer_email)) {
+                // SCENARIO 1: User has no referrer → bind normally
+                $coupon_data = get_commission_coupon_data($commission_coupon);
+                if ($coupon_data) {
+                    $customer_email = $order->get_billing_email();
+                    $holder_email = $coupon_data['holder_email'];
 
-                    // Save to order meta
-                    update_post_meta($order_id, '_commission_coupon_used', $commission_coupon);
+                    // Prevent self-referral
+                    if ($customer_email !== $holder_email) {
+                        add_downline($holder_email, $customer_email);
 
-                    $order->add_order_note("Commission triggered by user referral relationship (Code: $commission_coupon) - No coupon applied but referral relationship exists.", false, true);
+                        // Save referral info to user meta
+                        update_user_meta($user_id, '_commission_referral_code', $commission_coupon);
+                        update_user_meta($user_id, '_commission_referrer_email', $holder_email);
+                        update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
 
-                    error_log("Commission: User $user_id has referral code $commission_coupon, processing commission even without coupon usage");
+                        $order->add_order_note("SCENARIO 1: New referral relationship created. Holder: $holder_email, Code: $commission_coupon", false, true);
+                        error_log("Commission: SCENARIO 1 - New user bound to holder $holder_email via code $commission_coupon");
+                    }
+                }
+            } else {
+                // User has existing referrer
+                $new_coupon_data = get_commission_coupon_data($commission_coupon);
+                if ($new_coupon_data) {
+                    $new_holder_email = $new_coupon_data['holder_email'];
+
+                    // Check if trying to use a different holder's code
+                    if ($new_holder_email !== $current_referrer_email) {
+                        $has_purchase_history = commission_user_has_purchase_history($user_id);
+
+                        if (!$has_purchase_history) {
+                            // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
+                            commission_transfer_referral($user_id, $commission_coupon);
+
+                            $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
+                            error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
+                        } else {
+                            // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
+                            // Store temporary commission holder for this order only
+                            update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
+                            update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
+
+                            $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
+                            error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
+                        }
+                    }
                 }
             }
-
-            if (!$found_commission_coupon) {
-                // Add a note that no commission coupon was used and no referral relationship exists
-                $order->add_order_note("No commission coupon was used for this order and no referral relationship found.", false, true);
-                return;
-            }
         }
+
+        // Save commission coupon to order meta
+        update_post_meta($order_id, '_commission_coupon_used', $commission_coupon);
+        update_post_meta($order_id, '_commission_source', $commission_source);
     }
     
-    $coupon_data = get_commission_coupon_data($commission_coupon);
+    // Check if this order has a temporary holder (Scenario 2-2)
+    $temp_holder_email = get_post_meta($order_id, '_commission_temp_holder_email', true);
+    $temp_coupon_code = get_post_meta($order_id, '_commission_temp_coupon_code', true);
+
+    if (!empty($temp_holder_email) && !empty($temp_coupon_code)) {
+        // Use temporary holder's coupon data for this order only
+        $coupon_data = get_commission_coupon_data($temp_coupon_code);
+        if ($coupon_data) {
+            // Override the commission coupon to use the temporary one
+            $commission_coupon = $temp_coupon_code;
+
+            error_log("Commission: Using temporary holder $temp_holder_email for order $order_id (Scenario 2-2)");
+        }
+    } else {
+        $coupon_data = get_commission_coupon_data($commission_coupon);
+    }
+
     if ($coupon_data) {
-        // Process downline relationship
+        // Process downline relationship (only if not Scenario 2-2)
         $customer_email = $order->get_billing_email();
-        add_downline($coupon_data['holder_email'], $customer_email);
-        
+        if (empty($temp_holder_email)) {
+            add_downline($coupon_data['holder_email'], $customer_email);
+        }
+
         // Calculate and record commission
         $order_total = $order->get_total();
         $commission_result = calculate_and_record_commission($coupon_data, $order_total, $order_id);
-        
+
         // Add order note with commission details
         if ($commission_result) {
             add_commission_order_note($order, $coupon_data, $order_total, $commission_result);
         }
-        
+
         // Log for debugging
         error_log("Commission processed for Order ID: $order_id, Coupon: $commission_coupon, Total: $order_total");
     } else {
