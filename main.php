@@ -202,14 +202,16 @@ function process_commission_on_order_complete($order_id) {
         return; // Already processed
     }
     
+    // Get user ID first (needed for scenario logic)
+    $user_id = $order->get_user_id();
+
     // Check if commission coupon was used (stored in order meta)
     $commission_coupon = get_post_meta($order_id, '_commission_coupon_used', true);
+    $commission_source = get_post_meta($order_id, '_commission_source', true);
 
-    // Variable to track the source of the commission code
-    $commission_source = 'unknown';
-
-    if (!$commission_coupon) {
-        $user_id = $order->get_user_id();
+    // If not already determined, OR if source is missing, find the commission coupon and source
+    // This ensures we re-evaluate source for orders where coupon was saved but source wasn't
+    if (!$commission_coupon || !$commission_source) {
         $found_commission_coupon = false;
 
         // PRIORITY 1: Check Cookie for referral code (from referral link)
@@ -265,64 +267,65 @@ function process_commission_on_order_complete($order_id) {
             return;
         }
 
-        // Now handle the 3 scenarios based on user's current status
-        if ($user_id && $commission_source !== 'existing_relationship') {
-            $current_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
-            $current_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
+        // Save commission coupon to order meta
+        update_post_meta($order_id, '_commission_coupon_used', $commission_coupon);
+        update_post_meta($order_id, '_commission_source', $commission_source);
+    }
 
-            if (empty($current_referrer_email)) {
-                // SCENARIO 1: User has no referrer → bind normally
-                $coupon_data = get_commission_coupon_data($commission_coupon);
-                if ($coupon_data) {
-                    $customer_email = $order->get_billing_email();
-                    $holder_email = $coupon_data['holder_email'];
+    // IMPORTANT: Execute scenario logic for all orders (even if coupon was already saved during checkout)
+    // This ensures referral relationships are properly created/transferred
+    if ($user_id && $commission_coupon && $commission_source !== 'existing_relationship') {
+        $current_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
+        $current_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
 
-                    // Prevent self-referral
-                    if ($customer_email !== $holder_email) {
-                        add_downline($holder_email, $customer_email);
+        if (empty($current_referrer_email)) {
+            // SCENARIO 1: User has no referrer → bind normally
+            $coupon_data = get_commission_coupon_data($commission_coupon);
+            if ($coupon_data) {
+                $customer_email = $order->get_billing_email();
+                $holder_email = $coupon_data['holder_email'];
 
-                        // Save referral info to user meta
-                        update_user_meta($user_id, '_commission_referral_code', $commission_coupon);
-                        update_user_meta($user_id, '_commission_referrer_email', $holder_email);
-                        update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
+                // Prevent self-referral
+                if ($customer_email !== $holder_email) {
+                    add_downline($holder_email, $customer_email);
 
-                        $order->add_order_note("SCENARIO 1: New referral relationship created. Holder: $holder_email, Code: $commission_coupon", false, true);
-                        error_log("Commission: SCENARIO 1 - New user bound to holder $holder_email via code $commission_coupon");
-                    }
+                    // Save referral info to user meta
+                    update_user_meta($user_id, '_commission_referral_code', $commission_coupon);
+                    update_user_meta($user_id, '_commission_referrer_email', $holder_email);
+                    update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
+
+                    $order->add_order_note("SCENARIO 1: New referral relationship created. Holder: $holder_email, Code: $commission_coupon", false, true);
+                    error_log("Commission: SCENARIO 1 - New user bound to holder $holder_email via code $commission_coupon");
                 }
-            } else {
-                // User has existing referrer
-                $new_coupon_data = get_commission_coupon_data($commission_coupon);
-                if ($new_coupon_data) {
-                    $new_holder_email = $new_coupon_data['holder_email'];
+            }
+        } else {
+            // User has existing referrer
+            $new_coupon_data = get_commission_coupon_data($commission_coupon);
+            if ($new_coupon_data) {
+                $new_holder_email = $new_coupon_data['holder_email'];
 
-                    // Check if trying to use a different holder's code
-                    if ($new_holder_email !== $current_referrer_email) {
-                        $has_purchase_history = commission_user_has_purchase_history($user_id);
+                // Check if trying to use a different holder's code
+                if ($new_holder_email !== $current_referrer_email) {
+                    $has_purchase_history = commission_user_has_purchase_history($user_id);
 
-                        if (!$has_purchase_history) {
-                            // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
-                            commission_transfer_referral($user_id, $commission_coupon);
+                    if (!$has_purchase_history) {
+                        // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
+                        commission_transfer_referral($user_id, $commission_coupon);
 
-                            $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
-                            error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
-                        } else {
-                            // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
-                            // Store temporary commission holder for this order only
-                            update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
-                            update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
+                        $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
+                        error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
+                    } else {
+                        // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
+                        // Store temporary commission holder for this order only
+                        update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
+                        update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
 
-                            $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
-                            error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
-                        }
+                        $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
+                        error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
                     }
                 }
             }
         }
-
-        // Save commission coupon to order meta
-        update_post_meta($order_id, '_commission_coupon_used', $commission_coupon);
-        update_post_meta($order_id, '_commission_source', $commission_source);
     }
     
     // Check if this order has a temporary holder (Scenario 2-2)
@@ -557,19 +560,21 @@ function save_commission_coupon_to_order($order_id) {
     // Check session first
     $coupon_code = WC()->session->get('commission_coupon_used');
     $coupon_data = WC()->session->get('commission_coupon_data');
-    
+
     if ($coupon_code && $coupon_data) {
         update_post_meta($order_id, '_commission_coupon_used', $coupon_code);
         update_post_meta($order_id, '_commission_coupon_data', $coupon_data);
-        
+        // Save source as 'manual_coupon' since this is triggered by woocommerce_applied_coupon hook
+        update_post_meta($order_id, '_commission_source', 'manual_coupon');
+
         // Clear session
         WC()->session->__unset('commission_coupon_used');
         WC()->session->__unset('commission_coupon_data');
-        
+
         // Add order note
         $order = wc_get_order($order_id);
         if ($order) {
-            $order->add_order_note('Commission coupon saved: ' . $coupon_code . ' (Holder: ' . $coupon_data['holder_email'] . ')', false, true);
+            $order->add_order_note('Commission coupon saved: ' . $coupon_code . ' (Holder: ' . $coupon_data['holder_email'] . ') [Source: manual_coupon]', false, true);
         }
     }
 }
