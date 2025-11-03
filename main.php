@@ -101,6 +101,10 @@ function commission_order_has_excluded_categories($order_id) {
 /**
  * Check if user has purchase history (has commission records)
  * Excludes the current order to avoid timing issues
+ *
+ * @param int $user_id User ID
+ * @param int $exclude_order_id Current order ID to exclude
+ * @return bool True if user has previous commission records
  */
 function commission_user_has_purchase_history($user_id, $exclude_order_id = null) {
     if (!$user_id) return false;
@@ -111,31 +115,42 @@ function commission_user_has_purchase_history($user_id, $exclude_order_id = null
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Build query to check commission records, excluding current order if specified
-    $sql = "SELECT COUNT(DISTINCT cr.id)
-        FROM $records_table cr
-        WHERE EXISTS (
-            SELECT 1
-            FROM {$wpdb->postmeta} pm
-            WHERE pm.post_id = cr.order_id
-            AND pm.meta_key = '_billing_email'
-            AND pm.meta_value = %s
-        )";
+    // Get all completed orders for this user (by email)
+    $user_orders = $wpdb->get_col($wpdb->prepare(
+        "SELECT DISTINCT p.ID
+        FROM {$wpdb->posts} p
+        INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+        WHERE pm.meta_key = '_billing_email'
+        AND pm.meta_value = %s
+        AND p.post_type = 'shop_order'
+        AND p.post_status = 'wc-completed'",
+        $user->user_email
+    ));
 
-    $params = array($user->user_email);
-
-    // Exclude current order to avoid timing issues
-    // (purchase history should only check PREVIOUS orders, not the current one being processed)
-    if ($exclude_order_id) {
-        $sql .= " AND cr.order_id != %d";
-        $params[] = $exclude_order_id;
+    if (empty($user_orders)) {
+        error_log("Commission: User $user_id ({$user->user_email}) has no completed orders");
+        return false;
     }
 
-    $has_records = $wpdb->get_var($wpdb->prepare($sql, $params));
+    // Remove current order from the list if specified
+    if ($exclude_order_id && in_array($exclude_order_id, $user_orders)) {
+        $user_orders = array_diff($user_orders, array($exclude_order_id));
+    }
+
+    if (empty($user_orders)) {
+        error_log("Commission: User $user_id ({$user->user_email}) has no previous orders (only current order)");
+        return false;
+    }
+
+    // Check if any of these orders have commission records
+    $placeholders = implode(',', array_fill(0, count($user_orders), '%d'));
+    $sql = "SELECT COUNT(*) FROM $records_table WHERE order_id IN ($placeholders)";
+
+    $has_records = $wpdb->get_var($wpdb->prepare($sql, $user_orders));
 
     error_log("Commission: Checking purchase history for user $user_id ({$user->user_email})" .
               ($exclude_order_id ? " excluding order $exclude_order_id" : "") .
-              ": Found $has_records records");
+              ": Found $has_records commission records in " . count($user_orders) . " previous orders");
 
     return $has_records > 0;
 }
