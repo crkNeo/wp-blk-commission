@@ -100,8 +100,9 @@ function commission_order_has_excluded_categories($order_id) {
 
 /**
  * Check if user has purchase history (has commission records)
+ * Excludes the current order to avoid timing issues
  */
-function commission_user_has_purchase_history($user_id) {
+function commission_user_has_purchase_history($user_id, $exclude_order_id = null) {
     if (!$user_id) return false;
 
     $user = get_user_by('id', $user_id);
@@ -110,10 +111,8 @@ function commission_user_has_purchase_history($user_id) {
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Simplified query: Check if user has any commission records
-    // by checking if any of their orders (identified by billing_email) have commission records
-    $has_records = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(DISTINCT cr.id)
+    // Build query to check commission records, excluding current order if specified
+    $sql = "SELECT COUNT(DISTINCT cr.id)
         FROM $records_table cr
         WHERE EXISTS (
             SELECT 1
@@ -121,11 +120,22 @@ function commission_user_has_purchase_history($user_id) {
             WHERE pm.post_id = cr.order_id
             AND pm.meta_key = '_billing_email'
             AND pm.meta_value = %s
-        )",
-        $user->user_email
-    ));
+        )";
 
-    error_log("Commission: Checking purchase history for user $user_id ({$user->user_email}): Found $has_records records");
+    $params = array($user->user_email);
+
+    // Exclude current order to avoid timing issues
+    // (purchase history should only check PREVIOUS orders, not the current one being processed)
+    if ($exclude_order_id) {
+        $sql .= " AND cr.order_id != %d";
+        $params[] = $exclude_order_id;
+    }
+
+    $has_records = $wpdb->get_var($wpdb->prepare($sql, $params));
+
+    error_log("Commission: Checking purchase history for user $user_id ({$user->user_email})" .
+              ($exclude_order_id ? " excluding order $exclude_order_id" : "") .
+              ": Found $has_records records");
 
     return $has_records > 0;
 }
@@ -317,7 +327,9 @@ function process_commission_on_order_complete($order_id) {
                 // Check if trying to use a different holder's code
                 if ($new_holder_email !== $current_referrer_email) {
                     error_log("Commission: User $user_id is using a different holder's code. Checking purchase history...");
-                    $has_purchase_history = commission_user_has_purchase_history($user_id);
+                    // IMPORTANT: Exclude current order when checking purchase history
+                    // to avoid timing issues (commission record for current order hasn't been created yet)
+                    $has_purchase_history = commission_user_has_purchase_history($user_id, $order_id);
                     error_log("Commission: Purchase history result: " . ($has_purchase_history ? 'YES' : 'NO'));
 
                     if (!$has_purchase_history) {
