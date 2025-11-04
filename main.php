@@ -115,26 +115,29 @@ function commission_user_has_purchase_history($user_id, $exclude_order_id = null
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Get all completed orders for this user (by email)
+    // Get all orders for this user (by email)
+    // Note: We don't filter by post_status because we only care about orders that have commission records
     $user_orders = $wpdb->get_col($wpdb->prepare(
         "SELECT DISTINCT p.ID
         FROM {$wpdb->posts} p
         INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
         WHERE pm.meta_key = '_billing_email'
         AND pm.meta_value = %s
-        AND p.post_type = 'shop_order'
-        AND p.post_status = 'wc-completed'",
+        AND p.post_type = 'shop_order'",
         $user->user_email
     ));
 
     if (empty($user_orders)) {
-        error_log("Commission: User $user_id ({$user->user_email}) has no completed orders");
+        error_log("Commission: User $user_id ({$user->user_email}) has no orders");
         return false;
     }
+
+    error_log("Commission: User $user_id ({$user->user_email}) has " . count($user_orders) . " orders: " . implode(', ', $user_orders));
 
     // Remove current order from the list if specified
     if ($exclude_order_id && in_array($exclude_order_id, $user_orders)) {
         $user_orders = array_diff($user_orders, array($exclude_order_id));
+        error_log("Commission: After excluding order $exclude_order_id, user has " . count($user_orders) . " previous orders");
     }
 
     if (empty($user_orders)) {
@@ -150,7 +153,7 @@ function commission_user_has_purchase_history($user_id, $exclude_order_id = null
 
     error_log("Commission: Checking purchase history for user $user_id ({$user->user_email})" .
               ($exclude_order_id ? " excluding order $exclude_order_id" : "") .
-              ": Found $has_records commission records in " . count($user_orders) . " previous orders");
+              ": Found $has_records commission records in " . count($user_orders) . " previous orders (order IDs: " . implode(', ', $user_orders) . ")");
 
     return $has_records > 0;
 }
