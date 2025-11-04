@@ -115,45 +115,41 @@ function commission_user_has_purchase_history($user_id, $exclude_order_id = null
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Get all orders for this user (by email)
-    // Note: We don't filter by post_status because we only care about orders that have commission records
-    $user_orders = $wpdb->get_col($wpdb->prepare(
-        "SELECT DISTINCT p.ID
-        FROM {$wpdb->posts} p
-        INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
-        WHERE pm.meta_key = '_billing_email'
-        AND pm.meta_value = %s
-        AND p.post_type = 'shop_order'",
-        $user->user_email
+    // Use WooCommerce API to get user's orders
+    // This is compatible with both traditional (wp_posts) and HPOS (wp_wc_orders) storage
+    $customer_orders = wc_get_orders(array(
+        'customer_id' => $user_id,
+        'limit' => -1, // Get all orders
+        'return' => 'ids', // Only return IDs
     ));
 
-    if (empty($user_orders)) {
+    if (empty($customer_orders)) {
         error_log("Commission: User $user_id ({$user->user_email}) has no orders");
         return false;
     }
 
-    error_log("Commission: User $user_id ({$user->user_email}) has " . count($user_orders) . " orders: " . implode(', ', $user_orders));
+    error_log("Commission: User $user_id ({$user->user_email}) has " . count($customer_orders) . " orders: " . implode(', ', $customer_orders));
 
     // Remove current order from the list if specified
-    if ($exclude_order_id && in_array($exclude_order_id, $user_orders)) {
-        $user_orders = array_diff($user_orders, array($exclude_order_id));
-        error_log("Commission: After excluding order $exclude_order_id, user has " . count($user_orders) . " previous orders");
+    if ($exclude_order_id && in_array($exclude_order_id, $customer_orders)) {
+        $customer_orders = array_diff($customer_orders, array($exclude_order_id));
+        error_log("Commission: After excluding order $exclude_order_id, user has " . count($customer_orders) . " previous orders");
     }
 
-    if (empty($user_orders)) {
+    if (empty($customer_orders)) {
         error_log("Commission: User $user_id ({$user->user_email}) has no previous orders (only current order)");
         return false;
     }
 
     // Check if any of these orders have commission records
-    $placeholders = implode(',', array_fill(0, count($user_orders), '%d'));
+    $placeholders = implode(',', array_fill(0, count($customer_orders), '%d'));
     $sql = "SELECT COUNT(*) FROM $records_table WHERE order_id IN ($placeholders)";
 
-    $has_records = $wpdb->get_var($wpdb->prepare($sql, $user_orders));
+    $has_records = $wpdb->get_var($wpdb->prepare($sql, $customer_orders));
 
     error_log("Commission: Checking purchase history for user $user_id ({$user->user_email})" .
               ($exclude_order_id ? " excluding order $exclude_order_id" : "") .
-              ": Found $has_records commission records in " . count($user_orders) . " previous orders (order IDs: " . implode(', ', $user_orders) . ")");
+              ": Found $has_records commission records in " . count($customer_orders) . " previous orders (order IDs: " . implode(', ', $customer_orders) . ")");
 
     return $has_records > 0;
 }
