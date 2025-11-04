@@ -155,6 +155,114 @@ function commission_user_has_purchase_history($user_id, $exclude_order_id = null
 }
 
 /**
+ * Check if user is an approved Venus Member (exclusive member)
+ * Venus Members have permanent referral relationships that cannot be transferred
+ *
+ * @param int $user_id User ID
+ * @return object|false If user is a Venus Member, returns application data with referrer info, otherwise false
+ */
+function commission_user_is_venus_member($user_id) {
+    if (!$user_id) return false;
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'venus_member_applications';
+
+    // Check if table exists
+    $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'");
+    if (!$table_exists) {
+        error_log("Commission: venus_member_applications table does not exist");
+        return false;
+    }
+
+    // Check if user has an approved Venus Member application
+    $application = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, user_id, referrer_email, referrer_user_id, application_status
+        FROM $table_name
+        WHERE user_id = %d
+        AND application_status = 'approved'
+        LIMIT 1",
+        $user_id
+    ));
+
+    if ($application && !empty($application->referrer_email)) {
+        error_log("Commission: User $user_id is Venus Member with permanent referrer: {$application->referrer_email}");
+        return $application;
+    }
+
+    error_log("Commission: User $user_id is NOT a Venus Member");
+    return false;
+}
+
+/**
+ * Ensure downline relationship exists between holder and customer
+ * This is a helper function to maintain downline relationships
+ *
+ * @param string $holder_email Holder's email
+ * @param string $customer_email Customer's email
+ * @return bool Success or failure
+ */
+function commission_ensure_downline_relationship($holder_email, $customer_email) {
+    // Prevent self-referral
+    if ($holder_email === $customer_email) {
+        error_log("Commission: Cannot create self-referral relationship for $holder_email");
+        return false;
+    }
+
+    global $wpdb;
+    $downlines_table = $wpdb->prefix . 'commission_downlines';
+
+    // Check if relationship already exists
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $downlines_table WHERE downline_email = %s",
+        $customer_email
+    ));
+
+    if ($existing) {
+        // Check if it's the same holder
+        if ($existing->holder_email === $holder_email) {
+            error_log("Commission: Downline relationship already exists: $customer_email -> $holder_email");
+            return true; // Already correct
+        } else {
+            error_log("Commission: Downline relationship exists but with different holder: $customer_email -> {$existing->holder_email} (requested: $holder_email)");
+            // Don't change existing relationship automatically
+            return false;
+        }
+    }
+
+    // Create new downline relationship
+    $result = $wpdb->insert(
+        $downlines_table,
+        array(
+            'holder_email' => $holder_email,
+            'downline_email' => $customer_email,
+            'created_at' => current_time('mysql')
+        ),
+        array('%s', '%s', '%s')
+    );
+
+    if ($result) {
+        error_log("Commission: Created new downline relationship: $customer_email -> $holder_email");
+        return true;
+    }
+
+    error_log("Commission: Failed to create downline relationship: $customer_email -> $holder_email");
+    return false;
+}
+
+/**
+ * Get user's current referrer email from user meta
+ *
+ * @param int $user_id User ID
+ * @return string|false Referrer email or false if not found
+ */
+function commission_get_user_referrer($user_id) {
+    if (!$user_id) return false;
+
+    $referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
+    return !empty($referrer_email) ? $referrer_email : false;
+}
+
+/**
  * Transfer referral relationship from one holder to another
  */
 function commission_transfer_referral($user_id, $new_referral_code) {
@@ -306,66 +414,97 @@ function process_commission_on_order_complete($order_id) {
     // IMPORTANT: Execute scenario logic for all orders (even if coupon was already saved during checkout)
     // This ensures referral relationships are properly created/transferred
     if ($user_id && $commission_coupon && $commission_source !== 'existing_relationship') {
-        $current_referral_code = get_user_meta($user_id, '_commission_referral_code', true);
-        $current_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
+        $customer_email = $order->get_billing_email();
+        $new_coupon_data = get_commission_coupon_data($commission_coupon);
 
-        if (empty($current_referrer_email)) {
-            // SCENARIO 1: User has no referrer → bind normally
-            $coupon_data = get_commission_coupon_data($commission_coupon);
-            if ($coupon_data) {
-                $customer_email = $order->get_billing_email();
-                $holder_email = $coupon_data['holder_email'];
-
-                // Prevent self-referral
-                if ($customer_email !== $holder_email) {
-                    add_downline($holder_email, $customer_email);
-
-                    // Save referral info to user meta
-                    update_user_meta($user_id, '_commission_referral_code', $commission_coupon);
-                    update_user_meta($user_id, '_commission_referrer_email', $holder_email);
-                    update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
-
-                    $order->add_order_note("SCENARIO 1: New referral relationship created. Holder: $holder_email, Code: $commission_coupon", false, true);
-                    error_log("Commission: SCENARIO 1 - New user bound to holder $holder_email via code $commission_coupon");
-                }
-            }
+        if (!$new_coupon_data) {
+            error_log("Commission: Invalid coupon data for $commission_coupon");
         } else {
-            // User has existing referrer
-            error_log("Commission: User $user_id has existing referrer: $current_referrer_email");
+            $new_holder_email = $new_coupon_data['holder_email'];
 
-            $new_coupon_data = get_commission_coupon_data($commission_coupon);
-            if ($new_coupon_data) {
-                $new_holder_email = $new_coupon_data['holder_email'];
-                error_log("Commission: New coupon holder: $new_holder_email, Current holder: $current_referrer_email");
+            // Prevent self-referral
+            if ($customer_email === $new_holder_email) {
+                $order->add_order_note("Cannot use own referral code for commission.", false, true);
+                error_log("Commission: Self-referral prevented for $customer_email");
+            } else {
+                // PRIORITY 1: Check if user is a Venus Member (highest priority)
+                $venus_member = commission_user_is_venus_member($user_id);
 
-                // Check if trying to use a different holder's code
-                if ($new_holder_email !== $current_referrer_email) {
-                    error_log("Commission: User $user_id is using a different holder's code. Checking purchase history...");
-                    // IMPORTANT: Exclude current order when checking purchase history
-                    // to avoid timing issues (commission record for current order hasn't been created yet)
-                    $has_purchase_history = commission_user_has_purchase_history($user_id, $order_id);
-                    error_log("Commission: Purchase history result: " . ($has_purchase_history ? 'YES' : 'NO'));
+                if ($venus_member && !empty($venus_member->referrer_email)) {
+                    // SCENARIO 2-3: Venus Member - permanent relationship
+                    error_log("Commission: SCENARIO 2-3 - User $user_id is Venus Member with permanent referrer: {$venus_member->referrer_email}");
 
-                    if (!$has_purchase_history) {
-                        // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
-                        error_log("Commission: Executing SCENARIO 2-1 - Transfer from $current_referrer_email to $new_holder_email");
-                        commission_transfer_referral($user_id, $commission_coupon);
+                    // Ensure downline relationship is with Venus Member referrer
+                    commission_ensure_downline_relationship($venus_member->referrer_email, $customer_email);
 
-                        $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
-                        error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
+                    // Update user meta to Venus Member referrer (in case it was changed)
+                    update_user_meta($user_id, '_commission_referrer_email', $venus_member->referrer_email);
+
+                    // Check if using same referrer's code or different code
+                    if ($new_holder_email === $venus_member->referrer_email) {
+                        // Using Venus Member referrer's code - normal flow
+                        $order->add_order_note("SCENARIO 2-3: Venus Member using own referrer's code. Holder: {$venus_member->referrer_email}", false, true);
+                        error_log("Commission: SCENARIO 2-3 - Venus Member using own referrer's code");
                     } else {
-                        // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
-                        error_log("Commission: Executing SCENARIO 2-2 - User $user_id stays with $current_referrer_email, this order goes to $new_holder_email");
+                        // Using different referrer's code - this order's commission goes to new holder, but relationship stays
+                        $order->add_order_note("SCENARIO 2-3: Venus Member (permanent referrer: {$venus_member->referrer_email}) using different code ($commission_coupon). This order's commission goes to $new_holder_email, but relationship remains with Venus Member referrer.", false, true);
+                        error_log("Commission: SCENARIO 2-3 - Venus Member stays with {$venus_member->referrer_email}, but order $order_id commission goes to $new_holder_email");
 
                         // Store temporary commission holder for this order only
                         update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
                         update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
-
-                        $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
-                        error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
                     }
                 } else {
-                    error_log("Commission: User $user_id is using same holder's code ($new_holder_email). No scenario change needed.");
+                    // NOT a Venus Member - proceed with regular scenario logic
+                    $current_referrer_email = get_user_meta($user_id, '_commission_referrer_email', true);
+
+                    if (empty($current_referrer_email)) {
+                        // SCENARIO 1: User has no referrer → bind normally
+                        error_log("Commission: SCENARIO 1 - New user $user_id binding to holder $new_holder_email");
+
+                        add_downline($new_holder_email, $customer_email);
+
+                        // Save referral info to user meta
+                        update_user_meta($user_id, '_commission_referral_code', $commission_coupon);
+                        update_user_meta($user_id, '_commission_referrer_email', $new_holder_email);
+                        update_user_meta($user_id, '_commission_referral_date', current_time('mysql'));
+
+                        $order->add_order_note("SCENARIO 1: New referral relationship created. Holder: $new_holder_email, Code: $commission_coupon", false, true);
+                        error_log("Commission: SCENARIO 1 - New user bound to holder $new_holder_email via code $commission_coupon");
+                    } else {
+                        // User has existing referrer
+                        error_log("Commission: User $user_id has existing referrer: $current_referrer_email");
+
+                        // Check if trying to use a different holder's code
+                        if ($new_holder_email !== $current_referrer_email) {
+                            error_log("Commission: User $user_id is using a different holder's code. Checking purchase history...");
+
+                            // IMPORTANT: Exclude current order when checking purchase history
+                            $has_purchase_history = commission_user_has_purchase_history($user_id, $order_id);
+                            error_log("Commission: Purchase history result: " . ($has_purchase_history ? 'YES' : 'NO'));
+
+                            if (!$has_purchase_history) {
+                                // SCENARIO 2-1: Has referrer but no purchase history → transfer to new referrer
+                                error_log("Commission: Executing SCENARIO 2-1 - Transfer from $current_referrer_email to $new_holder_email");
+                                commission_transfer_referral($user_id, $commission_coupon);
+
+                                $order->add_order_note("SCENARIO 2-1: User transferred from $current_referrer_email to $new_holder_email (no purchase history). Commission goes to new holder.", false, true);
+                                error_log("Commission: SCENARIO 2-1 - User $user_id transferred from $current_referrer_email to $new_holder_email");
+                            } else {
+                                // SCENARIO 2-2: Has referrer and has purchase history → keep original referrer, but this order's commission goes to new holder
+                                error_log("Commission: Executing SCENARIO 2-2 - User $user_id stays with $current_referrer_email, this order goes to $new_holder_email");
+
+                                // Store temporary commission holder for this order only
+                                update_post_meta($order_id, '_commission_temp_holder_email', $new_holder_email);
+                                update_post_meta($order_id, '_commission_temp_coupon_code', $commission_coupon);
+
+                                $order->add_order_note("SCENARIO 2-2: User stays with original holder $current_referrer_email (has purchase history), but this order's commission goes to $new_holder_email using code $commission_coupon.", false, true);
+                                error_log("Commission: SCENARIO 2-2 - User $user_id stays with $current_referrer_email, but order $order_id commission goes to $new_holder_email");
+                            }
+                        } else {
+                            error_log("Commission: User $user_id is using same holder's code ($new_holder_email). No scenario change needed.");
+                        }
+                    }
                 }
             }
         }
