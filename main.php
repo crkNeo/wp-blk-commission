@@ -179,10 +179,10 @@ function commission_user_is_venus_member($user_id) {
         "SELECT id, user_id, referrer_email, referrer_user_id, application_status
         FROM $table_name
         WHERE user_id = %d
-        AND application_status = 'approved'
         LIMIT 1",
         $user_id
     ));
+    // TODO: 狀態確認是否必要 ， AND application_status = 'approved'
 
     if ($application && !empty($application->referrer_email)) {
         error_log("Commission: User $user_id is Venus Member with permanent referrer: {$application->referrer_email}");
