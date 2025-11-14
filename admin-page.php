@@ -71,7 +71,16 @@ function commission_admin_menu() {
         'commission-settings',
         'commission_settings_page'
     );
-    
+
+    add_submenu_page(
+        'commission-system',
+        '上下線管理',
+        '上下線管理',
+        'manage_options',
+        'commission-downlines',
+        'commission_downlines_page'
+    );
+
 }
 
 function commission_admin_page() {
@@ -662,3 +671,354 @@ function commission_settings_page() {
     <?php
 }
 
+function commission_downlines_page() {
+    global $wpdb;
+    $downlines_table = $wpdb->prefix . 'commission_downlines';
+
+    // Handle form submissions
+    if (isset($_POST['action'])) {
+        if ($_POST['action'] === 'add_downline') {
+            $holder_email = sanitize_email($_POST['holder_email']);
+            $downline_email = sanitize_email($_POST['downline_email']);
+
+            // Prevent self-referral
+            if ($holder_email === $downline_email) {
+                echo '<div class="notice notice-error"><p>不能將自己設為自己的下線！</p></div>';
+            } else {
+                // Check if relationship already exists
+                $existing = $wpdb->get_row($wpdb->prepare(
+                    "SELECT * FROM $downlines_table WHERE downline_email = %s",
+                    $downline_email
+                ));
+
+                if ($existing) {
+                    echo '<div class="notice notice-error"><p>此下線已存在於系統中（上線：' . esc_html($existing->holder_email) . '）</p></div>';
+                } else {
+                    $result = $wpdb->insert(
+                        $downlines_table,
+                        array(
+                            'holder_email' => $holder_email,
+                            'downline_email' => $downline_email,
+                            'created_at' => current_time('mysql')
+                        ),
+                        array('%s', '%s', '%s')
+                    );
+
+                    if ($result) {
+                        // Also update user meta if user exists
+                        $user = get_user_by('email', $downline_email);
+                        if ($user) {
+                            update_user_meta($user->ID, '_commission_referrer_email', $holder_email);
+                        }
+                        echo '<div class="notice notice-success"><p>上下線關係新增成功！</p></div>';
+                    } else {
+                        echo '<div class="notice notice-error"><p>新增失敗，請重試。</p></div>';
+                    }
+                }
+            }
+        } elseif ($_POST['action'] === 'update_downline') {
+            $downline_id = intval($_POST['downline_id']);
+            $new_holder_email = sanitize_email($_POST['holder_email']);
+
+            // Get current downline info
+            $current = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $downlines_table WHERE id = %d",
+                $downline_id
+            ));
+
+            if ($current) {
+                // Prevent self-referral
+                if ($new_holder_email === $current->downline_email) {
+                    echo '<div class="notice notice-error"><p>不能將用戶設為自己的上線！</p></div>';
+                } else {
+                    $result = $wpdb->update(
+                        $downlines_table,
+                        array('holder_email' => $new_holder_email),
+                        array('id' => $downline_id),
+                        array('%s'),
+                        array('%d')
+                    );
+
+                    if ($result !== false) {
+                        // Update user meta
+                        $user = get_user_by('email', $current->downline_email);
+                        if ($user) {
+                            update_user_meta($user->ID, '_commission_referrer_email', $new_holder_email);
+                        }
+                        echo '<div class="notice notice-success"><p>上下線關係更新成功！</p></div>';
+                    } else {
+                        echo '<div class="notice notice-error"><p>更新失敗，請重試。</p></div>';
+                    }
+                }
+            }
+        } elseif ($_POST['action'] === 'delete_downline') {
+            $downline_id = intval($_POST['downline_id']);
+
+            // Get downline info before deleting
+            $downline = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $downlines_table WHERE id = %d",
+                $downline_id
+            ));
+
+            $result = $wpdb->delete(
+                $downlines_table,
+                array('id' => $downline_id),
+                array('%d')
+            );
+
+            if ($result) {
+                // Clear user meta
+                if ($downline) {
+                    $user = get_user_by('email', $downline->downline_email);
+                    if ($user) {
+                        delete_user_meta($user->ID, '_commission_referrer_email');
+                        delete_user_meta($user->ID, '_commission_referral_code');
+                        delete_user_meta($user->ID, '_commission_referral_date');
+                    }
+                }
+                echo '<div class="notice notice-success"><p>上下線關係刪除成功！</p></div>';
+            } else {
+                echo '<div class="notice notice-error"><p>刪除失敗，請重試。</p></div>';
+            }
+        }
+    }
+
+    // Get search parameter
+    $search = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
+
+    // Get pagination parameters
+    $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+    $per_page = 20;
+    $offset = ($paged - 1) * $per_page;
+
+    // Build query
+    $where = '';
+    $params = array();
+
+    if (!empty($search)) {
+        $where = "WHERE holder_email LIKE %s OR downline_email LIKE %s";
+        $search_term = '%' . $wpdb->esc_like($search) . '%';
+        $params = array($search_term, $search_term);
+    }
+
+    // Get total count
+    $total_sql = "SELECT COUNT(*) FROM $downlines_table $where";
+    if (!empty($params)) {
+        $total_count = $wpdb->get_var($wpdb->prepare($total_sql, $params));
+    } else {
+        $total_count = $wpdb->get_var($total_sql);
+    }
+
+    // Get downlines with pagination
+    $sql = "SELECT * FROM $downlines_table $where ORDER BY created_at DESC LIMIT %d OFFSET %d";
+    $query_params = array_merge($params, array($per_page, $offset));
+
+    if (!empty($params)) {
+        $downlines = $wpdb->get_results($wpdb->prepare($sql, $query_params));
+    } else {
+        $downlines = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $downlines_table ORDER BY created_at DESC LIMIT %d OFFSET %d",
+            $per_page,
+            $offset
+        ));
+    }
+
+    $total_pages = ceil($total_count / $per_page);
+
+    ?>
+
+    <div class="wrap">
+        <h1>上下線管理</h1>
+        <p>管理推薦人與下線的關係。此處的修改會同步更新用戶的 meta 資料。</p>
+
+        <!-- Search Form -->
+        <div class="downlines-search">
+            <form method="get" action="">
+                <input type="hidden" name="page" value="commission-downlines">
+                <input type="text" name="search" value="<?php echo esc_attr($search); ?>" placeholder="搜尋上線或下線 Email...">
+                <input type="submit" class="button" value="搜尋">
+                <?php if (!empty($search)): ?>
+                    <a href="<?php echo admin_url('admin.php?page=commission-downlines'); ?>" class="button">清除搜尋</a>
+                <?php endif; ?>
+            </form>
+            <p class="description">共找到 <?php echo $total_count; ?> 筆上下線關係</p>
+        </div>
+
+        <!-- Add New Downline Form -->
+        <div class="downline-form-container">
+            <h2>新增上下線關係</h2>
+            <form method="post" action="">
+                <input type="hidden" name="action" value="add_downline">
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">上線 Email（推薦人）</th>
+                        <td><input type="email" name="holder_email" required class="regular-text" placeholder="推薦人的Email"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">下線 Email（被推薦人）</th>
+                        <td><input type="email" name="downline_email" required class="regular-text" placeholder="被推薦人的Email"></td>
+                    </tr>
+                </table>
+                <?php submit_button('新增上下線關係'); ?>
+            </form>
+        </div>
+
+        <!-- Downlines List -->
+        <div class="downlines-list">
+            <h2>上下線關係列表</h2>
+
+            <?php if (empty($downlines)): ?>
+                <p>沒有找到任何上下線關係。</p>
+            <?php else: ?>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">ID</th>
+                            <th>上線 Email（推薦人）</th>
+                            <th>下線 Email（被推薦人）</th>
+                            <th>建立時間</th>
+                            <th style="width: 200px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($downlines as $downline): ?>
+                        <tr id="downline-row-<?php echo $downline->id; ?>">
+                            <td><?php echo esc_html($downline->id); ?></td>
+                            <td>
+                                <span class="view-mode-<?php echo $downline->id; ?>">
+                                    <?php echo esc_html($downline->holder_email); ?>
+                                </span>
+                                <span class="edit-mode-<?php echo $downline->id; ?>" style="display:none;">
+                                    <input type="email" class="regular-text" id="edit-holder-<?php echo $downline->id; ?>" value="<?php echo esc_attr($downline->holder_email); ?>">
+                                </span>
+                            </td>
+                            <td><?php echo esc_html($downline->downline_email); ?></td>
+                            <td><?php echo esc_html($downline->created_at); ?></td>
+                            <td>
+                                <span class="view-mode-<?php echo $downline->id; ?>">
+                                    <button class="button edit-downline-btn" data-id="<?php echo $downline->id; ?>">編輯</button>
+                                    <form method="post" style="display:inline;">
+                                        <input type="hidden" name="action" value="delete_downline">
+                                        <input type="hidden" name="downline_id" value="<?php echo $downline->id; ?>">
+                                        <input type="submit" class="button button-link-delete" value="刪除" onclick="return confirm('確定要刪除此上下線關係嗎？這將清除用戶的推薦人資料。')">
+                                    </form>
+                                </span>
+                                <span class="edit-mode-<?php echo $downline->id; ?>" style="display:none;">
+                                    <button class="button button-primary save-downline-btn" data-id="<?php echo $downline->id; ?>">儲存</button>
+                                    <button class="button cancel-edit-btn" data-id="<?php echo $downline->id; ?>">取消</button>
+                                </span>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <!-- Pagination -->
+                <?php if ($total_pages > 1): ?>
+                <div class="tablenav">
+                    <div class="tablenav-pages">
+                        <span class="displaying-num"><?php echo $total_count; ?> 項目</span>
+                        <span class="pagination-links">
+                            <?php
+                            $base_url = admin_url('admin.php?page=commission-downlines');
+                            if (!empty($search)) {
+                                $base_url .= '&search=' . urlencode($search);
+                            }
+
+                            if ($paged > 1): ?>
+                                <a class="button" href="<?php echo $base_url . '&paged=' . ($paged - 1); ?>">« 上一頁</a>
+                            <?php endif; ?>
+
+                            <span class="paging-input">
+                                第 <?php echo $paged; ?> 頁，共 <?php echo $total_pages; ?> 頁
+                            </span>
+
+                            <?php if ($paged < $total_pages): ?>
+                                <a class="button" href="<?php echo $base_url . '&paged=' . ($paged + 1); ?>">下一頁 »</a>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                </div>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <style>
+    .downlines-search {
+        background: #fff;
+        padding: 15px;
+        margin: 20px 0;
+        border: 1px solid #ccd0d4;
+        border-radius: 4px;
+    }
+    .downlines-search form {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .downlines-search input[type="text"] {
+        min-width: 300px;
+    }
+    .downline-form-container {
+        background: #fff;
+        padding: 20px;
+        margin: 20px 0;
+        border: 1px solid #ccd0d4;
+        border-radius: 4px;
+    }
+    .downlines-list {
+        margin-top: 30px;
+    }
+    .tablenav {
+        padding: 10px 0;
+    }
+    .tablenav-pages {
+        float: right;
+    }
+    .pagination-links {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+    }
+    </style>
+
+    <script>
+    jQuery(document).ready(function($) {
+        // Edit button click
+        $('.edit-downline-btn').click(function() {
+            var id = $(this).data('id');
+            $('.view-mode-' + id).hide();
+            $('.edit-mode-' + id).show();
+        });
+
+        // Cancel button click
+        $('.cancel-edit-btn').click(function() {
+            var id = $(this).data('id');
+            $('.edit-mode-' + id).hide();
+            $('.view-mode-' + id).show();
+        });
+
+        // Save button click
+        $('.save-downline-btn').click(function() {
+            var id = $(this).data('id');
+            var newHolderEmail = $('#edit-holder-' + id).val();
+
+            if (!newHolderEmail) {
+                alert('請輸入上線 Email');
+                return;
+            }
+
+            // Create and submit form
+            var form = $('<form method="post"></form>');
+            form.append('<input type="hidden" name="action" value="update_downline">');
+            form.append('<input type="hidden" name="downline_id" value="' + id + '">');
+            form.append('<input type="hidden" name="holder_email" value="' + newHolderEmail + '">');
+            $('body').append(form);
+            form.submit();
+        });
+    });
+    </script>
+    <?php
+}
