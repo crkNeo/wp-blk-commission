@@ -1022,20 +1022,33 @@ function commission_flush_rewrite_rules_on_deactivation() {
 // Check if user is registered in commission system
 function commission_is_user_in_system($user_email) {
     global $wpdb;
-    $coupons_table = $wpdb->prefix . 'commission_coupons';
+    $records_table = $wpdb->prefix . 'commission_records';
 
-    // Check if user is a holder, teacher, or director in active coupons
-    $result = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM $coupons_table
-         WHERE status = 'active' AND (
-             holder_email = %s OR
-             teacher_email = %s OR
-             director_email = %s
-         )",
-        $user_email, $user_email, $user_email
+    // Check if user has any commission records (as holder, teacher, or director)
+    $holder_count = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $records_table WHERE holder_email = %s",
+        $user_email
     ));
 
-    return $result > 0;
+    if ($holder_count > 0) {
+        return true;
+    }
+
+    $teacher_count = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $records_table WHERE teacher_email = %s AND teacher_commission > 0",
+        $user_email
+    ));
+
+    if ($teacher_count > 0) {
+        return true;
+    }
+
+    $director_count = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $records_table WHERE director_email = %s AND director_commission > 0",
+        $user_email
+    ));
+
+    return $director_count > 0;
 }
 
 /**
