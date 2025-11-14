@@ -73,11 +73,11 @@ function commission_maybe_flush_rewrite_rules() {
 
 // Add menu item to WooCommerce My Account
 function commission_add_wc_account_menu($items) {
-    // Check if user is registered in commission system
+    // Check if user has commission records in the system
     if (is_user_logged_in()) {
         $current_user = wp_get_current_user();
-        
-        // Check if user is registered in commission system (as holder, teacher, or director)
+
+        // Only show menu if user has actual commission records
         if (commission_is_user_in_system($current_user->user_email)) {
             // Insert after orders to control position
             $new_items = array();
@@ -107,17 +107,17 @@ function commission_wc_account_content() {
 
 // Add menu item to regular navigation menu
 function commission_add_menu_item($items, $args) {
-    // Only add for logged in users registered in commission system
+    // Only add for logged in users who have commission records
     if (is_user_logged_in()) {
         $current_user = wp_get_current_user();
-        
-        // Check if user is registered in commission system
+
+        // Check if user has actual commission records
         if (commission_is_user_in_system($current_user->user_email)) {
             $menu_item = '<li class="menu-item"><a href="' . home_url('/commission-reports/') . '">我的分潤</a></li>';
             $items .= $menu_item;
         }
     }
-    
+
     return $items;
 }
 
@@ -949,7 +949,7 @@ function commission_add_dashboard_widget() {
     if (is_user_logged_in()) {
         $current_user = wp_get_current_user();
 
-        // Check if user is registered in commission system
+        // Check if user has actual commission records
         if (commission_is_user_in_system($current_user->user_email)) {
             wp_add_dashboard_widget(
                 'commission_dashboard_widget',
@@ -1019,12 +1019,20 @@ function commission_flush_rewrite_rules_on_deactivation() {
     flush_rewrite_rules();
 }
 
-// Check if user is registered in commission system
+/**
+ * Check if user has actual commission records in the system
+ *
+ * This function checks if the user has any commission records as a holder, teacher, or director.
+ * Only users with actual commission records will see the frontend reports menu.
+ *
+ * @param string $user_email User's email address
+ * @return bool True if user has commission records, false otherwise
+ */
 function commission_is_user_in_system($user_email) {
     global $wpdb;
     $records_table = $wpdb->prefix . 'commission_records';
 
-    // Check if user has any commission records (as holder, teacher, or director)
+    // Check if user has any commission records as holder
     $holder_count = $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM $records_table WHERE holder_email = %s",
         $user_email
@@ -1034,6 +1042,7 @@ function commission_is_user_in_system($user_email) {
         return true;
     }
 
+    // Check if user has any commission records as teacher (with actual commission)
     $teacher_count = $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM $records_table WHERE teacher_email = %s AND teacher_commission > 0",
         $user_email
@@ -1043,6 +1052,7 @@ function commission_is_user_in_system($user_email) {
         return true;
     }
 
+    // Check if user has any commission records as director (with actual commission)
     $director_count = $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM $records_table WHERE director_email = %s AND director_commission > 0",
         $user_email
